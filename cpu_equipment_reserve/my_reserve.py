@@ -9,15 +9,28 @@ from typing import List, Dict, Optional
 
 INF = float("inf")
 DELAY_SECONDS = -2
-TICKET_ALIVE_SECONDS = 0
+TICKET_ALIVE_SECONDS = 55
 
 
-def get_timestamp(input_time: str) -> int:
+def get_timestamp(input_time: Optional[str] = None) -> Optional[int]:
+    if input_time is None or input_time == "":
+        return None
+
     from datetime import datetime
 
     time_format = "%Y-%m-%d %H:%M:%S"
-    time_obj = datetime.strptime(input_time, time_format)
-    timestamp = int(time_obj.timestamp())
+    try:
+        time_obj = datetime.strptime(input_time, time_format)  # Parse time
+    except ValueError as e:
+        raise ValueError(
+            f'Invalid time format. Please use "YYYY-mm-dd HH:MM:SS", e.g. "2024-04-01 09:30:00".'
+        ) from e
+    try:
+        timestamp = int(time_obj.timestamp())  # Convert datetime object to timestamp
+    except OSError as e:
+        raise RuntimeError(
+            f'Failed to convert time "{datetime.strftime(time_obj, time_format)}" to timestamp. Is this time too far away?'
+        ) from e
     return timestamp
 
 
@@ -25,18 +38,20 @@ class User:
     LOGIN_METHODS = ["oauth"]
     COOKIE_KEYS = ["session_lims2_cf_cpu"]
 
-    def __init__(
-        self, username: str, password: str, tag: str = "", login_method="oauth"
-    ) -> None:
-        if login_method.lower() not in self.LOGIN_METHODS:
-            raise ValueError(f"Unsupported login method: {login_method}")
-        self.credential = {
-            "username": username,
-            "password": password,
-        }
-        self.login_method = login_method
-        self.tag = tag
-        self.cookies = {}
+    def __init__(self) -> None:
+        self.__credential = {}
+        self.__login_method = self.LOGIN_METHODS[0]
+        self.__tag = ""
+        self.__cookies = {}
+
+    def get_cur_credential(self) -> dict:
+        return self.__credential
+
+    def get_cur_login_method(self) -> str:
+        return self.__login_method
+
+    def get_cur_tag(self) -> str:
+        return self.__tag
 
     def __oauth(self, service: str, credential: str, cookie_keys: List[str]) -> dict:
         def encode(string: str) -> str:
@@ -45,7 +60,7 @@ class User:
             # Base64 encode a string twice
             return b64encode(b64encode(str(string).encode("utf-8"))).decode("utf-8")
 
-        session = requests.Session()
+        session = requests.Session()  # Start a login session
         headers = {
             "DNT": "1",
             "Upgrade-Insecure-Requests": "1",
@@ -71,7 +86,15 @@ class User:
             "rememberpwd": "on",
         }
         # Login
-        session.post("https://id.cpu.edu.cn/sso/login", params=params, data=data)
+        response = session.post(
+            "https://id.cpu.edu.cn/sso/login", params=params, data=data
+        )
+
+        if response.status_code == 401:  # Unauthorized
+            raise RuntimeError(
+                "Failed to login via oauth. Please check your username and password."
+            )
+
         cookies_complete = session.cookies.get_dict()
         cookies = {}
         for cookie_key in cookie_keys:
@@ -83,25 +106,48 @@ class User:
                 )
         return cookies
 
-    def login(self) -> None:
-        if self.login_method == "oauth":
+    def __login(self) -> None:
+        if self.__login_method == "oauth":
             service = "https://dygx1.cpu.edu.cn/gateway/login?from=cpu&redirect=http%3A%2F%2Fdygx1.cpu.edu.cn%2Flims%2F%21people%2Fcpu%2Flogin"
-            self.cookies = deepcopy(
+            self.__cookies = deepcopy(
                 self.__oauth(
                     service=service,
-                    credential=self.credential,
+                    credential=self.__credential,
                     cookie_keys=self.COOKIE_KEYS,
                 )
             )
 
+    def set_credential(self, username: str = "", password: str = "") -> None:
+        if not isinstance(username, str):
+            raise ValueError(f"username must be a string, not {type(username)}.")
+        if not isinstance(password, str):
+            raise ValueError(f"password must be a string, not {type(password)}.")
+        if username == "" or password == "":
+            raise ValueError("username and password must not be empty.")
+        self.__credential = {"username": username, "password": password}
+
+    def set_login_method(self, login_method: str) -> None:
+        if login_method.lower() not in self.LOGIN_METHODS:
+            raise ValueError(f"Unsupported login method: {login_method}")
+        self.__login_method = login_method
+
+    def set_tag(self, tag: str) -> None:
+        if not isinstance(tag, str):
+            raise ValueError(f"tag must be a string, not {type(tag)}.")
+        self.__tag = tag
+
+    def set_cookies(self, cookies: Optional[Dict] = None) -> None:
+        if not (cookies is None or isinstance(cookies, dict)):
+            raise ValueError(f"cookies must be a dictionary, not {type(cookies)}.")
+        if cookies is not None:
+            self.__cookies = deepcopy(cookies)
+        else:
+            self.__login()
+
     def get_cookies(self) -> dict:
-        cookie_ready = True
-        for cookie_key in self.COOKIE_KEYS:
-            if cookie_key not in self.cookies:
-                cookie_ready = False
-        if not cookie_ready:
-            self.login()
-        return self.cookies
+        if self.__cookies == {}:
+            self.set_cookies()
+        return self.__cookies
 
 
 class Reserve:
@@ -161,15 +207,15 @@ class Reserve:
         response = requests.get(url=url, cookies=self.__cookies, headers=headers)
         response.encoding = "utf-8"
         re_calendar_id = re.search("calendar_id=([0-9]*)\&", response.text)
-        if re_calendar_id is None:
+        if re_calendar_id is None:  # Error handling
             error_msg = f"Failed to get equipment info for equipment {equipment_id}."
-            if response.status_code == 401:
+            if response.status_code == 401:  # Unauthorized
                 raise RuntimeError(
                     f"{error_msg} Unauthorized. Are cookies still valid?"
                 )
-            elif response.status_code == 404:
+            elif response.status_code == 404:  # Not found
                 raise RuntimeError(f"{error_msg} Equipment not found.")
-            else:
+            else:  # Other status codes
                 raise RuntimeError(
                     f"{error_msg} Unexpected status code {response.status_code}."
                 )
@@ -436,20 +482,20 @@ class Reserve:
 
 def schedule(
     dtend: int,
-    days_before_reserve: int,
+    days_in_advance: int,
     delay_seconds: float = 0,
     ticket_alive_seconds: float = INF,
 ):
     dest_time = int(dtend)  # The end time of the reservation period
     seconds_per_day = 86400  # 24 * 60 * 60
-    seconds_before_reserve = (
-        days_before_reserve * seconds_per_day
-    )  # reserve ahead of time
+    seconds_before_reserve = days_in_advance * seconds_per_day  # reserve ahead of time
     submit_time = (
         dest_time - seconds_before_reserve + delay_seconds
     )  # The time to submit the reservation
 
     def wrapper():
+        print("Connection established.")
+        line_break = ""
         while True:
             cur_time = time.time()
             time_left = submit_time - cur_time
@@ -463,7 +509,8 @@ def schedule(
                 f"\rTime left (s): {time_left:.4f}",
                 end="",
             )
-        print("Submitting...")
+            line_break = "\n"
+        print(f"{line_break}Submitting...\n")
 
     return wrapper
 
@@ -475,36 +522,35 @@ def single_reserve(
     reserve_info: dict,
     equipment_id: Optional[str] = None,
     equipment_info: Optional[dict] = None,
-    component_id: str = "0",
+    component_id: Optional[str] = None,
     intervene: Optional[callable] = None,
     hackstart: Optional[int] = None,
     hackend: Optional[int] = None,
-    hackuserid: Optional[str] = None,
+    hackuser_id: Optional[str] = None,
 ) -> dict:
     if not isinstance(credential, dict):
         raise ValueError(f"credential must be a dictionary, not {type(credential)}.")
 
-    reserve = Reserve()
+    user = User()
+    # Set cookies for user
     if "cookies" in credential and isinstance(credential["cookies"], dict):
-        reserve.set_cookies(cookies=credential["cookies"])
+        user.set_cookies(cookies=credential["cookies"])
     elif "username" in credential and "password" in credential:
+        user.set_credential(
+            username=str(credential["username"]), password=str(credential["password"])
+        )
         if "login_method" in credential:
-            user = User(
-                username=credential["username"],
-                password=credential["password"],
-                login_method=credential["login_method"],
-            )
-        else:
-            user = User(
-                username=credential["username"], password=credential["password"]
-            )
-        reserve.set_user(user=user)
-        reserve.set_cookies()
+            user.set_login_method(login_method=credential["login_method"])
+        user.set_cookies()
     else:
         raise ValueError(
             "Invalid credential. Either provide username and password or provide cookies."
         )
 
+    # Initialize reserve
+    reserve = Reserve()
+    reserve.set_user(user=user)
+    reserve.set_cookies()
     reserve.set_equipment_info(equipment_id=equipment_id, equipment_info=equipment_info)
 
     if not isinstance(reserve_info, dict):
@@ -514,16 +560,17 @@ def single_reserve(
     reserve_info_submit = {**reserve_info, "dtstart": int(dtstart), "dtend": int(dtend)}
 
     hack_form = {}
-    if hackstart is not None and hackend is not None:
-        # Fake reserve info, just for hacking
+    # Fake reserve info, just for hacking
+    if hackstart is not None:
         hack_form["dtstart"] = hackstart
+    if hackend is not None:
         hack_form["dtend"] = hackend
 
-    hack_submit = {
-        "component_id": component_id,
-    }
-    if hackuserid is not None:
-        hack_submit["currentUserId"] = hackuserid
+    hack_submit = {}
+    if component_id is not None and component_id != "":
+        hack_submit["component_id"] = str(component_id)
+    if hackuser_id is not None and hackuser_id != "":
+        hack_submit["currentUserId"] = str(hackuser_id)
 
     reserve.set_reserve_info(reserve_info=reserve_info_submit)
 
