@@ -230,13 +230,13 @@ class Reserve:
     def set_user(self, user: User) -> None:
         if not isinstance(user, User):
             raise ValueError(
-                f"The user must be an instance of class User, not {type(user)}."
+                f"user must be an instance of class User, not {type(user)}."
             )
         self.__user = user
 
     def set_cookies(self, cookies: Optional[Dict] = None) -> None:
         if not (cookies is None or isinstance(cookies, dict)):
-            raise ValueError(f"The cookies must be a dictionary, not {type(cookies)}.")
+            raise ValueError(f"cookies must be a dictionary, not {type(cookies)}.")
         if cookies is not None:
             self.__cookies = deepcopy(cookies)
         else:
@@ -256,13 +256,13 @@ class Reserve:
         if equipment_info is not None:
             if not isinstance(equipment_info, dict):
                 raise ValueError(
-                    f"The equipment_info must be a dictionary, not {type(equipment_info)}."
+                    f"equipment_info must be a dictionary, not {type(equipment_info)}."
                 )
             self.__equipment_info = equipment_info
         else:  # elif equipment_id is not None:
             if not (isinstance(equipment_id, str) or isinstance(equipment_id, int)):
                 raise ValueError(
-                    f"The equipment_id must be a string or an integer, not {type(equipment_id)}."
+                    f"equipment_id must be a string or an integer, not {type(equipment_id)}."
                 )
             self.__equipment_info = self.__get_equipment_info(
                 equipment_id=str(equipment_id)
@@ -271,12 +271,10 @@ class Reserve:
     def set_reserve_info(self, reserve_info: dict) -> None:
         if not isinstance(reserve_info, dict):
             raise ValueError(
-                f"The reserve_info must be a dictionary, not {type(reserve_info)}."
+                f"reserve_info must be a dictionary, not {type(reserve_info)}."
             )
         if not ("dtstart" in reserve_info and "dtend" in reserve_info):
-            raise ValueError(
-                'The reserve_info must contain "dtstart" and "dtend" keys.'
-            )
+            raise ValueError('reserve_info must contain "dtstart" and "dtend" keys.')
         dtstart = reserve_info["dtstart"]
         dtend = reserve_info["dtend"]
         if not (
@@ -484,7 +482,7 @@ def schedule(
     dtend: int,
     days_in_advance: int,
     delay_seconds: float = 0,
-    ticket_alive_seconds: float = INF,
+    ticket_alive_seconds: float = TICKET_ALIVE_SECONDS,
 ):
     dest_time = int(dtend)  # The end time of the reservation period
     seconds_per_day = 86400  # 24 * 60 * 60
