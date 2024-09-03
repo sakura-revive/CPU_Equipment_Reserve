@@ -56,10 +56,11 @@ def main():
     schedule = bool(config.get("schedule", False))
     if schedule:
         days_in_advance = int(reserve_info.get("days_in_advance", 0))
+        delay_seconds = float(config.get("delay_seconds", 0))
         intervene = my_reserve.schedule(
             dtend=dtend,
             days_in_advance=days_in_advance,
-            delay_seconds=my_reserve.DELAY_SECONDS,
+            delay_seconds=delay_seconds,
             ticket_alive_seconds=my_reserve.TICKET_ALIVE_SECONDS,
         )
     else:
