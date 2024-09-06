@@ -1,7 +1,9 @@
 # Config
 /config/*/*.yaml
+/config/*.yaml
 !/config/users/sample_user.yaml
 !/config/forms/0.yaml
+!/config/sample_config.yaml
 
 # Test
 /test

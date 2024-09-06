@@ -1,0 +1,4 @@
+requests
+python-socketio<5
+python-engineio<4
+pyyaml
